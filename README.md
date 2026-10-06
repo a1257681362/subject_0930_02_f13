@@ -183,3 +183,19 @@
 - 全程留证：设备登记/初始装机/运行小时/窗口/计划创建调整/工单生成跳过/派工/开工/换件/完工/验收/安全确认/关闭/逾期升级均写 `t_maint_change_evidence`（含操作者、前后 JSON 快照与幂等请求号），可经 `GET /api/aqua/maint/evidence` 按对象或 requestId 追溯。
 
 验收：`mvn test -Dtest=MaintenanceWorkOrderAcceptanceTest`，18 个检查点逐段输出报告（含真实双线程并发竞争校验），失败即停并给出停点。
+
+## 批次出池检验与放行签名（aqua-13）
+
+模块包路径 `com.evops.aqua.release`，在台账之上打通：按品种+用途组合发布检验阈值版本 → 一批一检验单（冻结版本与样品）→ 实验室按样品逐项目录入 → 系统比对阈值生成放行建议 → 检测报告与样品编号一一对应 → 退回补检保留原结论/原因/操作时间 → 复检追加不覆盖初检 → 授权人员电子签名后批次才进入发货，全程留证。
+
+- 阈值版本（`POST /api/aqua/release/rule-versions`，requestId 幂等）：检验项目按**品种 + 用途组合**逐指标配置闭区间 [min,max]（端点可空为单边约束）；**新版本发布后旧版本自动停用**，检验单建立即冻结版本快照，历史单复检仍按冻结版本判定。
+- 检验单（`POST /api/aqua/release/inspections`，requestId 幂等）：一批一单（同批存在未完结单拒绝），批次须在养，随单登记样品；未配置该品种+用途组合的生效版本拒绝建单。
+- 实验室录入（`POST /inspections/{id}/lab-submit`，requestId 幂等）：PENDING 落初检轮、RETURNED 落复检轮；样品×必检项目必须录全，**缺项一次性列全拒绝**；系统逐项按冻结阈值比对 PASS/FAIL，任一不合格整单建议 **FAIL**，全合格建议 **PASS**。
+- **复检不覆盖初检**：复检只追加新轮次（`origin_round_id` 指向被退回轮次），初检结果值、判定、提交人/时间原样保留；同 requestId 重放不产生新轮次。
+- **退回补检（`POST /inspections/{id}/return`，原因必填）**：初检结论、退回原因、操作人与操作时间逐行写入结论历史（多次退回多次留痕互不覆盖），检验单头保留最近一次退回事实。
+- **检测报告（`POST /inspections/{id}/reports`，requestId 幂等）**：报告号全局唯一且与样品编号**一一对应**——一个样品只能出一份报告，换号重出/占用他样报告号均拒绝；`GET /api/aqua/release/reports/{reportNo}` 按报告号唯一定位样品与逐项结果。
+- **授权电子签名（`POST /inspections/{id}/release`，requestId 幂等）**：签名人须先登记（`POST /signers`）且启用、口令正确；未登记/错口令/已禁用一律拒绝；系统对检验单关键事实生成 HMAC-SHA256 电子签章；**系统建议 FAIL 不得签名放行**。签名放行后批次才允许出池——守卫接入台账 `POST /api/aqua/batches/{id}/harvest`，未放行直接拦截；从未建检验单的历史批次行为不变。
+- 旧数据回放（`GET /api/aqua/release/batches/{batchId}/legacy-replay`）：回放海水养殖管理旧版自由文本抽检 `t_inspection_record`（旧记录原样保留不回改），从检验模型/阈值判定/复检/退回/样品报告/签名放行/留证 7 个维度列示新旧差异并逐条解释，`allDifferencesExplained=true` 方可提交新版本。
+- 全程留证：版本发布、建单、初检/复检录入、出报告、退回、签名、签名人启停均写 `t_pi_change_evidence`（含操作者、前后 JSON 快照与幂等请求号），可经 `GET /api/aqua/release/evidence` 按对象或 requestId 追溯。
+
+验收：`mvn test -Dtest=ReleaseInspectionAcceptanceTest`，14 个检查点（CP0–CP13）逐段输出报告，失败即停并给出停点。

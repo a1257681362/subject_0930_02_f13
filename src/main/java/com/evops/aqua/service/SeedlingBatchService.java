@@ -17,6 +17,7 @@ import com.evops.aqua.mapper.SeedlingBatchMapper;
 import com.evops.aqua.mapper.TransferRecordMapper;
 import com.evops.aqua.med.service.MedWithdrawalGuard;
 import com.evops.aqua.noculture.service.NoCultureGuard;
+import com.evops.aqua.release.service.PiInspectionService;
 import org.apache.shiro.SecurityUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
@@ -46,6 +47,7 @@ public class SeedlingBatchService {
     private final IsolationGuard isolationGuard;
     private final MedWithdrawalGuard medWithdrawalGuard;
     private final NoCultureGuard noCultureGuard;
+    private final PiInspectionService releaseInspectionService;
     private final ApplicationEventPublisher eventPublisher;
 
     public SeedlingBatchService(SeedlingBatchMapper batchMapper,
@@ -55,6 +57,7 @@ public class SeedlingBatchService {
                                 IsolationGuard isolationGuard,
                                 MedWithdrawalGuard medWithdrawalGuard,
                                 NoCultureGuard noCultureGuard,
+                                PiInspectionService releaseInspectionService,
                                 ApplicationEventPublisher eventPublisher) {
         this.batchMapper = batchMapper;
         this.pondService = pondService;
@@ -63,6 +66,7 @@ public class SeedlingBatchService {
         this.isolationGuard = isolationGuard;
         this.medWithdrawalGuard = medWithdrawalGuard;
         this.noCultureGuard = noCultureGuard;
+        this.releaseInspectionService = releaseInspectionService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -202,6 +206,8 @@ public class SeedlingBatchService {
         noCultureGuard.requireBatchNotFrozen(batchId, request.getHarvestDate(), "捕捞（出池）");
         noCultureGuard.requireActionAllowed(batch.getPondId(), request.getHarvestDate(), "捕捞（出池）");
         medWithdrawalGuard.requireHarvestAllowed(batch.getPondId(), request.getHarvestDate());
+        // 出池即进入发货：建过出池检验单的批次必须已由授权人员电子签名放行，否则禁止出池
+        releaseInspectionService.requireReleasedForShipment(batch.getId(), batch.getBatchNo());
         HarvestRecord record = new HarvestRecord();
         record.setBatchId(batch.getId());
         record.setPondId(batch.getPondId());
